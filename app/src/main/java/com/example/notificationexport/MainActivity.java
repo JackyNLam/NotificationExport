@@ -736,9 +736,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPackageSelectionDialog(final boolean include) {
-        // The app list follows the message selection: only apps that posted one of
-        // the chosen titles (include or exclude, whichever mode is active) are offered.
-        final Set<String> anchorTitles = draft.includeOnlyTitles
+        // Each list narrows its own counterpart only: the exclude app list follows the
+        // exclude message list, the include app list follows the include message list.
+        final Set<String> anchorTitles = include
                 ? draft.includedTitles : draft.excludedTitles;
         final List<String> allPkgs = extractUniquePackagesByFrequency(anchorTitles);
         if (allPkgs.isEmpty()) {
@@ -766,8 +766,7 @@ public class MainActivity extends AppCompatActivity {
         String title = (include ? "Include only these apps (" : "Exclude these apps (")
                 + allPkgs.size() + ")";
         if (!anchorTitles.isEmpty()) {
-            title += "\nFiltered by " + (draft.includeOnlyTitles ? "included" : "excluded")
-                    + " messages";
+            title += "\nFiltered by " + (include ? "included" : "excluded") + " messages";
         }
 
         new AlertDialog.Builder(this)
@@ -792,9 +791,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTitleSelectionDialog(final boolean include) {
-        // The message list follows the app selection, so only titles that came from
-        // the chosen apps are offered (the same rule in include and exclude mode).
-        final Set<String> anchorPkgs = draft.includeOnlyPkgs
+        // Same rule in exclude mode: the exclude message list only offers titles that
+        // came from the apps already chosen in the exclude app list (and vice versa).
+        final Set<String> anchorPkgs = include
                 ? draft.includedPkgs : draft.excludedPkgs;
         final List<String> allTitles = extractUniqueTitlesByFrequency(anchorPkgs);
         if (allTitles.isEmpty()) {
@@ -821,8 +820,7 @@ public class MainActivity extends AppCompatActivity {
         String title = (include ? "Include only these messages (" : "Exclude these messages (")
                 + allTitles.size() + ")";
         if (!anchorPkgs.isEmpty()) {
-            title += "\nFiltered by " + (draft.includeOnlyPkgs ? "included" : "excluded")
-                    + " apps";
+            title += "\nFiltered by " + (include ? "included" : "excluded") + " apps";
         }
 
         new AlertDialog.Builder(this)
