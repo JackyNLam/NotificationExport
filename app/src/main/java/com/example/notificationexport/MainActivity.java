@@ -619,8 +619,13 @@ public class MainActivity extends AppCompatActivity {
         btnSelectIncludeTitles.setOnClickListener(v -> showTitleSelectionDialog(true));
         layout.addView(btnSelectIncludeTitles);
 
+        Button btnResetFilters = new Button(this);
+        btnResetFilters.setAllCaps(false);
+        btnResetFilters.setText("\u21BA Reset filters");
+        layout.addView(btnResetFilters);
+
         TextView tvInfo = new TextView(this);
-        tvInfo.setText("\u2139\uFE0F Saved automatically and reused by the scheduled auto-export.");
+        tvInfo.setText("\u2139\uFE0F Reused by the scheduled auto-export once saved.");
         tvInfo.setTextSize(12);
         tvInfo.setTextColor(Color.GRAY);
         tvInfo.setPadding(0, 24, 0, 0);
@@ -628,19 +633,27 @@ public class MainActivity extends AppCompatActivity {
 
         refreshFilterButtonStates();
 
-        new AlertDialog.Builder(this)
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("\uD83D\uDD0D Filter and Period Before Export")
                 .setView(layout)
-                .setPositiveButton("Export Filtered", (d, which) -> {
+                .setPositiveButton("Save", (d, which) -> {
+                    draft.save(this);
+                    Toast.makeText(this, "\u2705 Filter preferences saved", Toast.LENGTH_SHORT).show();
+                })
+                .setNeutralButton("Export Filtered", (d, which) -> {
                     draft.save(this);
                     exportFiltered(range[0], range[1]);
                 })
-                .setNeutralButton("Reset", (d, which) -> {
-                    FilterConfig.reset(this);
-                    Toast.makeText(this, "\u2705 Filter preferences reset", Toast.LENGTH_SHORT).show();
-                })
                 .setNegativeButton("Cancel", null)
-                .show();
+                .create();
+        dialog.show();
+
+        btnResetFilters.setOnClickListener(v -> {
+            FilterConfig.reset(this);
+            Toast.makeText(this, "\u2705 Filter preferences reset", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+            showFilterDialog();
+        });
     }
 
     private View spacer() {
@@ -723,13 +736,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPackageSelectionDialog(final boolean include) {
-        final List<String> allPkgs = extractUniquePackagesByFrequency();
+        // The app list follows the message selection: only apps that posted one of
+        // the chosen titles (include or exclude, whichever mode is active) are offered.
+        final Set<String> anchorTitles = draft.includeOnlyTitles
+                ? draft.includedTitles : draft.excludedTitles;
+        final List<String> allPkgs = extractUniquePackagesByFrequency(anchorTitles);
         if (allPkgs.isEmpty()) {
-            Toast.makeText(this, "No apps found in log yet.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, anchorTitles.isEmpty()
+                    ? "No apps found in log yet."
+                    : "No apps found for the selected messages.", Toast.LENGTH_SHORT).show();
             return;
         }
 
         final Set<String> target = include ? draft.includedPkgs : draft.excludedPkgs;
+        final Set<String> previous = new HashSet<>(target);
 
         String[] displayNames = new String[allPkgs.size()];
         for (int i = 0; i < allPkgs.size(); i++) {
@@ -740,12 +760,18 @@ public class MainActivity extends AppCompatActivity {
 
         final boolean[] checkedItems = new boolean[allPkgs.size()];
         for (int i = 0; i < allPkgs.size(); i++) {
-            checkedItems[i] = target.contains(allPkgs.get(i));
+            checkedItems[i] = equalsIgnoreCase(previous, allPkgs.get(i));
+        }
+
+        String title = (include ? "Include only these apps (" : "Exclude these apps (")
+                + allPkgs.size() + ")";
+        if (!anchorTitles.isEmpty()) {
+            title += "\nFiltered by " + (draft.includeOnlyTitles ? "included" : "excluded")
+                    + " messages";
         }
 
         new AlertDialog.Builder(this)
-                .setTitle((include ? "Include only these apps (" : "Exclude these apps (")
-                        + allPkgs.size() + ")")
+                .setTitle(title)
                 .setMultiChoiceItems(displayNames, checkedItems,
                         (dialog, which, isChecked) -> checkedItems[which] = isChecked)
                 .setPositiveButton("OK", (dialog, which) -> {
@@ -753,6 +779,11 @@ public class MainActivity extends AppCompatActivity {
                     for (int i = 0; i < allPkgs.size(); i++) {
                         if (checkedItems[i]) target.add(allPkgs.get(i));
                     }
+                    // selections that the cascade no longer lists must survive
+                    for (String kept : previous) {
+                        if (!containsIgnoreCase(allPkgs, kept)) target.add(kept);
+                    }
+                    draft.save(this);
                     Button b = include ? btnSelectIncludeApps : btnSelectExcludeApps;
                     if (b != null) b.setText(appButtonText(include));
                 })
@@ -761,13 +792,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTitleSelectionDialog(final boolean include) {
-        final List<String> allTitles = extractUniqueTitlesByFrequency();
+        // The message list follows the app selection, so only titles that came from
+        // the chosen apps are offered (the same rule in include and exclude mode).
+        final Set<String> anchorPkgs = draft.includeOnlyPkgs
+                ? draft.includedPkgs : draft.excludedPkgs;
+        final List<String> allTitles = extractUniqueTitlesByFrequency(anchorPkgs);
         if (allTitles.isEmpty()) {
-            Toast.makeText(this, "No messages found in log yet.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, anchorPkgs.isEmpty()
+                    ? "No messages found in log yet."
+                    : "No messages found for the selected apps.", Toast.LENGTH_SHORT).show();
             return;
         }
 
         final Set<String> target = include ? draft.includedTitles : draft.excludedTitles;
+        final Set<String> previous = new HashSet<>(target);
 
         String[] displayNames = new String[allTitles.size()];
         for (int i = 0; i < allTitles.size(); i++) {
@@ -777,12 +815,18 @@ public class MainActivity extends AppCompatActivity {
 
         final boolean[] checkedItems = new boolean[allTitles.size()];
         for (int i = 0; i < allTitles.size(); i++) {
-            checkedItems[i] = target.contains(allTitles.get(i));
+            checkedItems[i] = equalsIgnoreCase(previous, allTitles.get(i));
+        }
+
+        String title = (include ? "Include only these messages (" : "Exclude these messages (")
+                + allTitles.size() + ")";
+        if (!anchorPkgs.isEmpty()) {
+            title += "\nFiltered by " + (draft.includeOnlyPkgs ? "included" : "excluded")
+                    + " apps";
         }
 
         new AlertDialog.Builder(this)
-                .setTitle((include ? "Include only these messages (" : "Exclude these messages (")
-                        + allTitles.size() + ")")
+                .setTitle(title)
                 .setMultiChoiceItems(displayNames, checkedItems,
                         (dialog, which, isChecked) -> checkedItems[which] = isChecked)
                 .setPositiveButton("OK", (dialog, which) -> {
@@ -790,6 +834,10 @@ public class MainActivity extends AppCompatActivity {
                     for (int i = 0; i < allTitles.size(); i++) {
                         if (checkedItems[i]) target.add(allTitles.get(i));
                     }
+                    for (String kept : previous) {
+                        if (!containsIgnoreCase(allTitles, kept)) target.add(kept);
+                    }
+                    draft.save(this);
                     Button b = include ? btnSelectIncludeTitles : btnSelectExcludeTitles;
                     if (b != null) b.setText(titleButtonText(include));
                 })
@@ -801,7 +849,7 @@ public class MainActivity extends AppCompatActivity {
     //  Log scanning helpers
     // ------------------------------------------------------------------
 
-    private List<String> extractUniquePackagesByFrequency() {
+    private List<String> extractUniquePackagesByFrequency(Set<String> allowedTitles) {
         Map<String, Integer> freq = new HashMap<>();
         File csvFile = new File(getFilesDir(), "notification_history.csv");
         if (!csvFile.exists()) return new ArrayList<>();
@@ -811,11 +859,14 @@ public class MainActivity extends AppCompatActivity {
             while ((line = reader.readLine()) != null) {
                 if (first) { first = false; continue; }
                 String[] parts = CsvFilter.parseCsvLine(line);
-                if (parts.length >= 2 && !parts[1].trim().isEmpty()) {
-                    String pkg = parts[1].trim();
-                    Integer count = freq.get(pkg);
-                    freq.put(pkg, count == null ? 1 : count + 1);
-                }
+                if (parts.length < 3) continue;
+                String pkg = parts[1].trim();
+                String title = parts[2].trim();
+                if (pkg.isEmpty()) continue;
+                if (allowedTitles != null && !allowedTitles.isEmpty()
+                        && !equalsIgnoreCase(allowedTitles, title)) continue;
+                Integer count = freq.get(pkg);
+                freq.put(pkg, count == null ? 1 : count + 1);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -823,7 +874,7 @@ public class MainActivity extends AppCompatActivity {
         return sortByFrequencyDesc(freq, Integer.MAX_VALUE);
     }
 
-    private List<String> extractUniqueTitlesByFrequency() {
+    private List<String> extractUniqueTitlesByFrequency(Set<String> allowedPkgs) {
         Map<String, Integer> freq = new HashMap<>();
         File csvFile = new File(getFilesDir(), "notification_history.csv");
         if (!csvFile.exists()) return new ArrayList<>();
@@ -833,16 +884,33 @@ public class MainActivity extends AppCompatActivity {
             while ((line = reader.readLine()) != null) {
                 if (first) { first = false; continue; }
                 String[] parts = CsvFilter.parseCsvLine(line);
-                if (parts.length >= 3 && !parts[2].trim().isEmpty()) {
-                    String title = parts[2].trim();
-                    Integer count = freq.get(title);
-                    freq.put(title, count == null ? 1 : count + 1);
-                }
+                if (parts.length < 3) continue;
+                String pkg = parts[1].trim();
+                String title = parts[2].trim();
+                if (title.isEmpty()) continue;
+                if (allowedPkgs != null && !allowedPkgs.isEmpty()
+                        && !equalsIgnoreCase(allowedPkgs, pkg)) continue;
+                Integer count = freq.get(title);
+                freq.put(title, count == null ? 1 : count + 1);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
         return sortByFrequencyDesc(freq, 2000);
+    }
+
+    private static boolean equalsIgnoreCase(Set<String> set, String value) {
+        for (String s : set) {
+            if (s != null && s.equalsIgnoreCase(value)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsIgnoreCase(List<String> list, String value) {
+        for (String s : list) {
+            if (s != null && s.equalsIgnoreCase(value)) return true;
+        }
+        return false;
     }
 
     private List<String> sortByFrequencyDesc(Map<String, Integer> freq, int limit) {

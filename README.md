@@ -15,7 +15,8 @@ Everything stays on-device. The app has no network permission and uploads nothin
   - Skip empty or `N/A` message bodies.
   - **Exclude** selected apps and message titles (multi-select, sorted by how often they appear).
   - **Include only** selected apps and message titles — the inverse filter. An include list wins over the exclude list when enabled and non-empty.
-  - Filter choices are persisted in `SharedPreferences`, restored next time, and reused by the scheduled export; a **Reset** action clears them.
+  - The app and message pickers narrow each other: once apps are selected, the message list only offers titles posted by those apps (and vice versa), in both include and exclude mode.
+  - Filter choices are saved as soon as a picker's **OK** is pressed (and by the dialog's **Save** button) in `SharedPreferences`, restored next time, and reused by the scheduled export; a **Reset filters** action clears them.
 - **Scheduled auto-export** — choose a time of day and an interval of *N* days (1 = daily), and the app writes a filtered CSV to
   `Android/data/com.example.notificationexport/files/exports/` (app-specific external storage, so no storage permission is required). A persisted row cursor means a row is exported at most once, so nothing is duplicated between runs; a low-priority notification confirms the save.
 - **Listener health monitoring**
@@ -48,7 +49,7 @@ Everything stays on-device. The app has no network permission and uploads nothin
    - ❌ Disconnected — access is off; re-enable it.
 5. Export when ready:
    - **2a. Export Full CSV History** — share the raw CSV.
-   - **2b. 🔍 Filter and Export CSV** — choose a day range (**From** / **To**, defaulting to the whole log), then the app and message filters, then share the filtered CSV.
+   - **2b. 🔍 Filter and Export CSV** — choose a day range (**From** / **To**, defaulting to the whole log), then the app and message filters (**Save** keeps the rules for the scheduled export, **Export Filtered** saves and shares the CSV).
 6. **3. ⏰ Auto-Export Schedule** — enable, set "every N day(s)", pick a time, save. The folder path and next run are shown under the button.
 7. **4. 🗑️ Clear Log History** — pick a cutoff day (default: keep today, delete older), or tick *Clear the entire log instead*. Rows that were never exported trigger an extra warning before deletion.
 
