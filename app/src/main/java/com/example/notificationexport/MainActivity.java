@@ -21,6 +21,9 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -65,6 +68,8 @@ public class MainActivity extends AppCompatActivity {
         tvStatus = findViewById(R.id.tvListenerStatus);
         tvScheduleInfo = findViewById(R.id.tvScheduleInfo);
 
+        applyWindowInsets();
+
         Button btnEnable = findViewById(R.id.btnEnableListener);
         Button btnExport = findViewById(R.id.btnExportLog);
         Button btnFilterExport = findViewById(R.id.btnFilterExport);
@@ -108,6 +113,31 @@ public class MainActivity extends AppCompatActivity {
         updateStatusUI();
         updateScheduleInfo();
         checkAndPromptIfStale();
+    }
+
+    /**
+     * Apps targeting SDK 35+ draw edge-to-edge, so the layout has to pad itself
+     * clear of the status bar and navigation bar.
+     */
+    private void applyWindowInsets() {
+        final View content = findViewById(R.id.contentLayout);
+        if (content == null) return;
+
+        final int side = dp(24);
+        final int top = dp(48);
+        final int bottom = dp(24);
+
+        ViewCompat.setOnApplyWindowInsetsListener(content, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(side, top + bars.top, side, bottom + bars.bottom);
+            return windowInsets;
+        });
+        ViewCompat.requestApplyInsets(content);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private void requestNotificationPermissionIfNeeded() {
@@ -342,7 +372,10 @@ public class MainActivity extends AppCompatActivity {
         CheckBox chkIncludePkgs = new CheckBox(this);
         chkIncludePkgs.setText("Apps: include only (ignore exclude list)");
         chkIncludePkgs.setChecked(draft.includeOnlyPkgs);
-        chkIncludePkgs.setOnCheckedChangeListener((btn, isChecked) -> draft.includeOnlyPkgs = isChecked);
+        chkIncludePkgs.setOnCheckedChangeListener((btn, isChecked) -> {
+            draft.includeOnlyPkgs = isChecked;
+            refreshFilterButtonStates();
+        });
         layout.addView(chkIncludePkgs);
 
         btnSelectExcludeApps = new Button(this);
@@ -362,7 +395,10 @@ public class MainActivity extends AppCompatActivity {
         CheckBox chkIncludeTitles = new CheckBox(this);
         chkIncludeTitles.setText("Messages: include only (ignore exclude list)");
         chkIncludeTitles.setChecked(draft.includeOnlyTitles);
-        chkIncludeTitles.setOnCheckedChangeListener((btn, isChecked) -> draft.includeOnlyTitles = isChecked);
+        chkIncludeTitles.setOnCheckedChangeListener((btn, isChecked) -> {
+            draft.includeOnlyTitles = isChecked;
+            refreshFilterButtonStates();
+        });
         layout.addView(chkIncludeTitles);
 
         btnSelectExcludeTitles = new Button(this);
@@ -384,6 +420,8 @@ public class MainActivity extends AppCompatActivity {
         tvInfo.setPadding(0, 24, 0, 0);
         layout.addView(tvInfo);
 
+        refreshFilterButtonStates();
+
         new AlertDialog.Builder(this)
                 .setTitle("\uD83D\uDD0D Filter Before Export")
                 .setView(layout)
@@ -403,6 +441,20 @@ public class MainActivity extends AppCompatActivity {
         View v = new View(this);
         v.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 24));
         return v;
+    }
+
+    /** An "include only" toggle makes the opposite list inapplicable. */
+    private void refreshFilterButtonStates() {
+        setControlEnabled(btnSelectIncludeApps, draft.includeOnlyPkgs);
+        setControlEnabled(btnSelectExcludeApps, !draft.includeOnlyPkgs);
+        setControlEnabled(btnSelectIncludeTitles, draft.includeOnlyTitles);
+        setControlEnabled(btnSelectExcludeTitles, !draft.includeOnlyTitles);
+    }
+
+    private void setControlEnabled(Button button, boolean enabled) {
+        if (button == null) return;
+        button.setEnabled(enabled);
+        button.setAlpha(enabled ? 1f : 0.4f);
     }
 
     private String appButtonText(boolean include) {
