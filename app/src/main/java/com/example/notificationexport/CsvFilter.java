@@ -118,6 +118,133 @@ public final class CsvFilter {
         return new Result(kept, skipped, newest, totalRows);
     }
 
+    /** Result of a purge (partial log deletion). */
+    public static final class PurgeResult {
+        public final int removed;
+        public final int remaining;
+        /** Removed rows that had not been written to any auto-export yet. */
+        public final int removedUnexported;
+        /** Cursor value to store afterwards, since row indices shift after a purge. */
+        public final int newCursor;
+
+        PurgeResult(int removed, int remaining, int removedUnexported, int newCursor) {
+            this.removed = removed;
+            this.remaining = remaining;
+            this.removedUnexported = removedUnexported;
+            this.newCursor = newCursor;
+        }
+    }
+
+    /** Counts what {@link #purgeBefore} would delete, without touching the file. */
+    public static PurgeResult analyzePurge(File raw, long cutoffMillis, int exportedRows) {
+        return scanPurge(raw, cutoffMillis, exportedRows, true);
+    }
+
+    /**
+     * Deletes every row older than {@code cutoffMillis}, keeping newer rows.
+     * Returns null if the log is missing. The auto-export cursor is reported in
+     * {@link PurgeResult#newCursor} and must be stored by the caller.
+     */
+    public static PurgeResult purgeBefore(File raw, long cutoffMillis, int exportedRows) {
+        return scanPurge(raw, cutoffMillis, exportedRows, false);
+    }
+
+    private static PurgeResult scanPurge(File raw, long cutoffMillis, int exportedRows, boolean dryRun) {
+        if (raw == null || !raw.exists()) return null;
+
+        SimpleDateFormat sdf = new SimpleDateFormat(DATE_PATTERN, Locale.US);
+        List<String> keep = new ArrayList<>();
+        int index = 0;
+        int removed = 0;
+        int removedUnexported = 0;
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(raw), StandardCharsets.UTF_8))) {
+            String line;
+            boolean first = true;
+            while ((line = reader.readLine()) != null) {
+                if (first) { first = false; continue; } // header
+                if (line.trim().isEmpty()) continue;
+
+                long rowMillis = Long.MAX_VALUE; // unparsable rows are kept
+                String[] parts = parseCsvLine(line);
+                if (parts.length > 0) {
+                    try {
+                        Date d = sdf.parse(parts[0].trim());
+                        if (d != null) rowMillis = d.getTime();
+                    } catch (Exception ignored) {
+                        // keep it
+                    }
+                }
+
+                if (rowMillis < cutoffMillis) {
+                    removed++;
+                    if (index >= exportedRows) removedUnexported++;
+                } else {
+                    keep.add(line);
+                }
+                index++;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+
+        int newCursor = Math.max(0, exportedRows - removed);
+
+        if (!dryRun) {
+            if (keep.isEmpty()) {
+                raw.delete();
+            } else {
+                writeKeptRows(raw, keep);
+            }
+        }
+        return new PurgeResult(removed, keep.size(), removedUnexported, newCursor);
+    }
+
+    private static void writeKeptRows(File raw, List<String> keep) {
+        File tmp = new File(raw.getParentFile(), raw.getName() + ".tmp");
+        try (OutputStreamWriter writer = new OutputStreamWriter(
+                new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
+            writer.write('\uFEFF');
+            writer.write(HEADER);
+            writer.write("\n");
+            for (String row : keep) {
+                writer.write(row);
+                writer.write("\n");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            tmp.delete();
+            return;
+        }
+
+        if (!tmp.renameTo(raw)) {
+            // Fall back to copy-through-and-replace.
+            raw.delete();
+            if (!tmp.renameTo(raw)) tmp.delete();
+        }
+    }
+
+    /** Number of data rows (excluding the header) in the raw log. */
+    public static int countDataRows(File raw) {
+        if (raw == null || !raw.exists()) return 0;
+        int rows = 0;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(raw), StandardCharsets.UTF_8))) {
+            String line;
+            boolean first = true;
+            while ((line = reader.readLine()) != null) {
+                if (first) { first = false; continue; }
+                if (line.trim().isEmpty()) continue;
+                rows++;
+            }
+        } catch (Exception e) {
+            return 0;
+        }
+        return rows;
+    }
+
     /** Newest timestamp in the raw capture log, or 0 when the log is missing/empty. */
     public static long lastTimestampMillis(android.content.Context ctx) {
         return boundaryTimestamp(ctx, false);

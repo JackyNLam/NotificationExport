@@ -89,20 +89,7 @@ public class MainActivity extends AppCompatActivity {
         btnFilterExport.setOnClickListener(v -> showFilterDialog());
         btnSchedule.setOnClickListener(v -> showScheduleDialog());
 
-        btnClear.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("Clear Log History")
-                .setMessage("Delete all captured notifications?")
-                .setPositiveButton("Yes", (dialog, which) -> {
-                    File csvFile = new File(getFilesDir(), "notification_history.csv");
-                    if (csvFile.exists() && csvFile.delete()) {
-                        ScheduleManager.resetCursor(this);
-                        Toast.makeText(this, "\u2705 Log cleared", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(this, "Log is already empty", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show());
+        btnClear.setOnClickListener(v -> showClearDialog());
 
         requestNotificationPermissionIfNeeded();
 
@@ -386,11 +373,154 @@ public class MainActivity extends AppCompatActivity {
 
     private void runSelfTest() {
         Toast.makeText(this, "Sending a silent test notification...", Toast.LENGTH_SHORT).show();
-        SelfTest.run(this, captured -> Toast.makeText(this,
-                captured
-                        ? "\u2705 Capture is working"
-                        : "\u274C Test notification was not captured \u2014 re-toggle notification access",
-                Toast.LENGTH_LONG).show());
+        SelfTest.run(this, captured -> {
+            Toast.makeText(this,
+                    captured
+                            ? "\u2705 Capture is working"
+                            : "\u274C Test notification was not captured \u2014 re-toggle notification access",
+                    Toast.LENGTH_LONG).show();
+            offerDebugExport();
+        });
+    }
+
+    /** Writes a copy of the real captured data for testing, without touching the export cursor. */
+    private void offerDebugExport() {
+        File debug = DebugExport.write(this);
+        if (debug == null) {
+            Toast.makeText(this, "No captured data yet \u2014 debug CSV skipped", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Debug CSV written")
+                .setMessage(debug.getAbsolutePath()
+                        + "\n\nA copy of the real captured rows (no filter applied). "
+                        + "It is separate from scheduled exports, and these rows can still "
+                        + "appear in future scheduled exports.")
+                .setPositiveButton("Share", (d, which) -> shareFile(debug, "Share debug CSV"))
+                .setNegativeButton("OK", null)
+                .show();
+    }
+
+    private void shareFile(File file, String chooserTitle) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("text/csv");
+            share.putExtra(Intent.EXTRA_STREAM, uri);
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share, chooserTitle));
+        } catch (Exception e) {
+            Toast.makeText(this, "\u274C Share failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Clear log (with cutoff + unexported-data protection)
+    // ------------------------------------------------------------------
+
+    private void showClearDialog() {
+        final File raw = new File(getFilesDir(), "notification_history.csv");
+        if (!raw.exists() || CsvFilter.countDataRows(raw) == 0) {
+            Toast.makeText(this, "Log is already empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        long newest = CsvFilter.lastTimestampMillis(this);
+        // Default: keep today's rows, delete everything from earlier days.
+        final long[] cutoff = {startOfDay(newest > 0 ? newest : System.currentTimeMillis())};
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(48, 32, 48, 16);
+
+        TextView tvInfo = new TextView(this);
+        tvInfo.setText("Rows captured before the chosen day are deleted. "
+                + "Rows from that day onward are kept.");
+        tvInfo.setTextSize(13);
+        layout.addView(tvInfo);
+
+        Button btnCutoff = new Button(this);
+        btnCutoff.setAllCaps(false);
+        btnCutoff.setText(cutoffText(cutoff[0]));
+        btnCutoff.setOnClickListener(v -> pickDay(cutoff[0] > 0 ? cutoff[0] - 1 : 0, true, millis -> {
+            cutoff[0] = millis;
+            btnCutoff.setText(cutoffText(millis));
+        }));
+        layout.addView(btnCutoff);
+
+        CheckBox chkAll = new CheckBox(this);
+        chkAll.setText("Clear the entire log instead");
+        chkAll.setOnCheckedChangeListener((b, checked) -> setControlEnabled(btnCutoff, !checked));
+        layout.addView(chkAll);
+
+        final int cursor = ScheduleManager.getExportedRowCount(this);
+        CsvFilter.PurgeResult preview = CsvFilter.analyzePurge(raw, cutoff[0], cursor);
+        TextView tvCount = new TextView(this);
+        tvCount.setText(preview == null ? ""
+                : preview.removed + " row(s) would be deleted, " + preview.remaining + " kept.");
+        tvCount.setTextSize(12);
+        tvCount.setTextColor(Color.parseColor("#757575"));
+        tvCount.setPadding(0, 12, 0, 0);
+        layout.addView(tvCount);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Clear Log History")
+                .setView(layout)
+                .setPositiveButton("Clear", (d, which) ->
+                        confirmPurge(raw, chkAll.isChecked() ? Long.MAX_VALUE : cutoff[0],
+                                chkAll.isChecked()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmPurge(File raw, long cutoffMillis, boolean all) {
+        int cursor = ScheduleManager.getExportedRowCount(this);
+        CsvFilter.PurgeResult preview = CsvFilter.analyzePurge(raw, cutoffMillis, cursor);
+        if (preview == null) {
+            Toast.makeText(this, "Log is already empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (preview.removedUnexported > 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("\u26A0\uFE0F Not exported yet")
+                    .setMessage(preview.removedUnexported + " of the " + preview.removed
+                            + " row(s) being deleted have never been written to an auto-export. "
+                            + "Once deleted they can never appear in a future export.\n\n"
+                            + "Export them first if you want to keep them.")
+                    .setPositiveButton("Delete anyway", (d, which) ->
+                            performPurge(raw, cutoffMillis, all))
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
+        performPurge(raw, cutoffMillis, all);
+    }
+
+    private void performPurge(File raw, long cutoffMillis, boolean all) {
+        if (all) {
+            if (raw.delete()) {
+                ScheduleManager.resetCursor(this);
+                Toast.makeText(this, "\u2705 Log cleared", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Could not clear the log", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        int cursor = ScheduleManager.getExportedRowCount(this);
+        CsvFilter.PurgeResult result = CsvFilter.purgeBefore(raw, cutoffMillis, cursor);
+        if (result == null) {
+            Toast.makeText(this, "Log is already empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ScheduleManager.setExportedRowCount(this, result.newCursor);
+        Toast.makeText(this, "\u2705 Deleted " + result.removed + " row(s), kept "
+                + result.remaining, Toast.LENGTH_LONG).show();
+    }
+
+    private static String cutoffText(long millis) {
+        return "Delete rows before: " + new SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                .format(new Date(millis));
     }
 
     // ------------------------------------------------------------------

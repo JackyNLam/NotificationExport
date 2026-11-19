@@ -23,9 +23,9 @@ Everything stays on-device. The app has no network permission and uploads nothin
   - Every 30 minutes a background job checks the log. If nothing was captured in the last 30 minutes it posts a **silent probe notification** and waits 8 seconds: if the probe is not captured either, the listener is considered broken and a high-priority alert asks you to re-toggle notification access.
   - A notification warns you immediately when the listener disconnects.
   - On device unlock, a broadcast receiver re-checks staleness and posts an alert if access appears to have been lost. (Android may silently kill notification listeners, especially under aggressive OEM battery management.)
-  - **Self-test now** in the schedule dialog runs the same probe on demand.
-- **Clear log** — delete the captured history from the app UI after confirmation.
-- **Custom launcher icon** — adaptive icon (gradient background, notification card + export arrow), a themed monochrome layer for Android 13+ themed icons, and generated legacy PNGs for API 24–25.
+  - **Self-test now** in the schedule dialog runs the same probe on demand, and then writes a **debug CSV** (`debug_export_<timestamp>.csv`) containing the real captured rows with no filter applied. The debug file is isolated: it never advances the auto-export cursor, so those same rows can still appear in a future scheduled export.
+- **Clear log by day** — delete only rows captured before a chosen date, or clear the whole log. Before deleting, the app counts rows that have **never been exported** and asks for explicit confirmation (`Delete anyway`), so unexported history is not lost by accident.
+- **Custom launcher icon** — adaptive icon (orange gradient, white notification card + export arrow), a themed monochrome layer for Android 13+ themed icons, and generated legacy PNGs for API 24–25.
 
 ---
 
@@ -50,7 +50,7 @@ Everything stays on-device. The app has no network permission and uploads nothin
    - **2a. Export Full CSV History** — share the raw CSV.
    - **2b. 🔍 Filter and Export CSV** — choose a day range (**From** / **To**, defaulting to the whole log), then the app and message filters, then share the filtered CSV.
 6. **3. ⏰ Auto-Export Schedule** — enable, set "every N day(s)", pick a time, save. The folder path and next run are shown under the button.
-7. **4. 🗑️ Clear Log History** — wipe the log (asks for confirmation).
+7. **4. 🗑️ Clear Log History** — pick a cutoff day (default: keep today, delete older), or tick *Clear the entire log instead*. Rows that were never exported trigger an extra warning before deletion.
 
 > If captures stop unexpectedly (common with aggressive battery savers), disable battery optimization for this app and re-toggle notification access.
 
@@ -106,6 +106,7 @@ app/src/main/java/com/example/notificationexport/
 ├── AutoExportReceiver.java               # Writes the scheduled filtered export
 ├── HealthCheckJobService.java            # 30-minute capture health check
 ├── SelfTest.java                         # Silent probe notification
+├── DebugExport.java                      # One-off debug CSV (cursor-safe)
 ├── UnlockReceiver.java                   # Staleness check on screen unlock
 └── BootReceiver.java                     # Re-arms alarm + job after boot/update
 
