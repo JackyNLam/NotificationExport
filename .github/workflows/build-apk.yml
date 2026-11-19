@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -40,16 +40,47 @@ jobs:
       - name: Decode signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::KEYSTORE_BASE64 secret is not set. See README for setup."
+            echo "::error::KEYSTORE_BASE64 secret is empty or unset."
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+          # Remove any newlines/spaces introduced by copy-paste or wrapping.
+          CLEAN=$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')
+
+          case "$CLEAN" in
+            *[!A-Za-z0-9+/=]*)
+              echo "::error::KEYSTORE_BASE64 contains non-base64 characters. Re-copy the one-line contents of keystore.b64."
+              exit 1
+              ;;
+          esac
+
+          if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.p12"; then
+            echo "::error::Failed to base64-decode KEYSTORE_BASE64."
+            exit 1
+          fi
+
+          SIZE=$(wc -c < "$RUNNER_TEMP/release.p12")
+          echo "Decoded keystore: $SIZE bytes"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::Decoded keystore is only $SIZE bytes — the secret does not look like the full .p12 file."
+            exit 1
+          fi
+
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            if openssl pkcs12 -info -in "$RUNNER_TEMP/release.p12" -passin "pass:$KEYSTORE_PASSWORD" -noout >/dev/null 2>&1; then
+              echo "Keystore opens with KEYSTORE_PASSWORD."
+            else
+              echo "::error::Keystore could not be opened with KEYSTORE_PASSWORD — password mismatch or corrupt file."
+              exit 1
+            fi
+          fi
 
       - name: Build signed release APK
         env:
-          RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.p12
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
