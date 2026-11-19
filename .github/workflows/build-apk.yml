@@ -49,16 +49,26 @@ jobs:
 
           # Remove any newlines/spaces introduced by copy-paste or wrapping.
           CLEAN=$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')
+          LEN=${#CLEAN}
+          MOD=$((LEN % 4))
 
           case "$CLEAN" in
             *[!A-Za-z0-9+/=]*)
-              echo "::error::KEYSTORE_BASE64 contains non-base64 characters. Re-copy the one-line contents of keystore.b64."
+              echo "::error::KEYSTORE_BASE64 contains non-base64 characters (length=$LEN). Re-copy the one-line contents of keystore.b64."
               exit 1
               ;;
           esac
 
-          if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.p12"; then
-            echo "::error::Failed to base64-decode KEYSTORE_BASE64."
+          # Tolerate omitted trailing padding.
+          case "$MOD" in
+            2) CLEAN="${CLEAN}==" ;;
+            3) CLEAN="${CLEAN}=" ;;
+            1) echo "::error::KEYSTORE_BASE64 length is invalid for base64 ($LEN chars, len%4=1) — the value is truncated."; exit 1 ;;
+          esac
+
+          if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.p12" 2>/tmp/b64err; then
+            ERR=$(head -c 200 /tmp/b64err | tr '\n' ' ')
+            echo "::error::Failed to base64-decode KEYSTORE_BASE64 (length=$LEN, len%4=$MOD): $ERR"
             exit 1
           fi
 
