@@ -1,24 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed-icon silhouette: one colour, tinted by the system. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M41,22 L67,22 A7,7 0 0 1 74,29 L74,35 A7,7 0 0 1 67,42 L41,42 A7,7 0 0 1 34,35 L34,29 A7,7 0 0 1 41,22 Z" />
-
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M46,86 C46,70 52,62 62,55.5"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="9" />
-
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M75.4,48 L66.65,62.98 L58.15,49.9 Z" />
-</vector>
+<!--
+  Themed-icon silhouette (Android 13+): the phone, notification card and
+  export arrow as one colour, tinted by the system.
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:gravity="fill"
+    android:src="@drawable/ic_launcher_mono" />

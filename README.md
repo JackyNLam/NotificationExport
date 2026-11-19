@@ -25,7 +25,7 @@ Everything stays on-device. The app has no network permission and uploads nothin
   - On device unlock, a broadcast receiver re-checks staleness and posts an alert if access appears to have been lost. (Android may silently kill notification listeners, especially under aggressive OEM battery management.)
   - **Self-test now** in the schedule dialog runs the same probe on demand, and then writes a **debug CSV** (`debug_export_<timestamp>.csv`) containing the real captured rows with no filter applied. The debug file is isolated: it never advances the auto-export cursor, so those same rows can still appear in a future scheduled export.
 - **Clear log by day** — delete only rows captured before a chosen date, or clear the whole log. Before deleting, the app counts rows that have **never been exported** and asks for explicit confirmation (`Delete anyway`), so unexported history is not lost by accident.
-- **Custom launcher icon** — adaptive icon (bagel‑tan gradient, white notification card above an export arrow that rises and then curves smoothly to the upper right), a themed monochrome layer for Android 13+ themed icons, and generated legacy PNGs for API 24–25.
+- **Custom launcher icon** — adaptive icon built from a bagel‑tan illustration (a phone shown with a floating notification card over it and an export arrow that rises and curves out to the upper right), a themed monochrome silhouette for Android 13+ themed icons, and generated legacy PNGs for API 24–25 with round and squircle masks.
 
 ---
 
