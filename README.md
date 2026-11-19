@@ -15,7 +15,12 @@ Everything stays on-device. The app has no network permission and uploads nothin
   - Skip empty or `N/A` message bodies.
   - **Exclude** selected apps and message titles (multi-select, sorted by how often they appear).
   - **Include only** selected apps and message titles — the inverse filter. An include list wins over the exclude list when enabled and non-empty.
-  - Each mode's two pickers narrow each other independently: once apps are selected, that mode's message list only offers titles posted by those apps (and vice versa). This applies to **Include only** and **Exclude** alike, regardless of which include-only checkbox is ticked.
+  - The two dimensions narrow each other and the export requires both (**A AND B**):
+    - **Include apps** → the message pickers only list messages posted by the included apps.
+    - **Exclude apps** → the message pickers only list the leftover messages, i.e. those not posted by an excluded app.
+    - **Include messages** → the app pickers only list apps that posted an included message.
+    - **Exclude messages** → the app pickers only list apps that still have a message which is not excluded.
+    - A row is exported only when it satisfies the app rule **and** the message rule (each rule uses the include list when enabled and non-empty, otherwise the exclude list).
   - Filter choices are saved as soon as a picker's **OK** is pressed (and by the dialog's **Save** button) in `SharedPreferences`, restored next time, and reused by the scheduled export; a **Reset filters** action clears them.
 - **Scheduled auto-export** — choose a time of day and an interval of *N* days (1 = daily), and the app writes a filtered CSV to
   `Android/data/com.example.notificationexport/files/exports/` (app-specific external storage, so no storage permission is required). A persisted row cursor means a row is exported at most once, so nothing is duplicated between runs; a low-priority notification confirms the save.

@@ -736,15 +736,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPackageSelectionDialog(final boolean include) {
-        // Each list narrows its own counterpart only: the exclude app list follows the
-        // exclude message list, the include app list follows the include message list.
-        final Set<String> anchorTitles = include
-                ? draft.includedTitles : draft.excludedTitles;
-        final List<String> allPkgs = extractUniquePackagesByFrequency(anchorTitles);
+        // Scoped by the message rules: an included app list offers only apps that posted
+        // an included message, an exclude list offers the apps left over once the
+        // excluded messages are dropped. Combined with the message rules this is A AND B.
+        final List<String> allPkgs = extractUniquePackagesByFrequency();
         if (allPkgs.isEmpty()) {
-            Toast.makeText(this, anchorTitles.isEmpty()
-                    ? "No apps found in log yet."
-                    : "No apps found for the selected messages.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "No apps match the current message filter.",
+                    Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -764,10 +762,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String title = (include ? "Include only these apps (" : "Exclude these apps (")
-                + allPkgs.size() + ")";
-        if (!anchorTitles.isEmpty()) {
-            title += "\nFiltered by " + (include ? "included" : "excluded") + " messages";
-        }
+                + allPkgs.size() + ")" + appScopeNote();
 
         new AlertDialog.Builder(this)
                 .setTitle(title)
@@ -791,15 +786,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTitleSelectionDialog(final boolean include) {
-        // Same rule in exclude mode: the exclude message list only offers titles that
-        // came from the apps already chosen in the exclude app list (and vice versa).
-        final Set<String> anchorPkgs = include
-                ? draft.includedPkgs : draft.excludedPkgs;
-        final List<String> allTitles = extractUniqueTitlesByFrequency(anchorPkgs);
+        // Mirror of the app picker: scoped by the app rules, so an include list offers the
+        // messages posted by the included apps and an exclude list offers the messages left
+        // over once the excluded apps are dropped.
+        final List<String> allTitles = extractUniqueTitlesByFrequency();
         if (allTitles.isEmpty()) {
-            Toast.makeText(this, anchorPkgs.isEmpty()
-                    ? "No messages found in log yet."
-                    : "No messages found for the selected apps.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "No messages match the current app filter.",
+                    Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -818,10 +811,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String title = (include ? "Include only these messages (" : "Exclude these messages (")
-                + allTitles.size() + ")";
-        if (!anchorPkgs.isEmpty()) {
-            title += "\nFiltered by " + (include ? "included" : "excluded") + " apps";
-        }
+                + allTitles.size() + ")" + titleScopeNote();
 
         new AlertDialog.Builder(this)
                 .setTitle(title)
@@ -847,7 +837,47 @@ public class MainActivity extends AppCompatActivity {
     //  Log scanning helpers
     // ------------------------------------------------------------------
 
-    private List<String> extractUniquePackagesByFrequency(Set<String> allowedTitles) {
+    /**
+     * True when a row's title still passes the message rules. This is what narrows the
+     * app pickers: include mode keeps only the included messages, exclude mode keeps
+     * everything that was not excluded.
+     */
+    private boolean titleSurvivesMessageRules(String title) {
+        if (draft.includeOnlyTitles && !draft.includedTitles.isEmpty()) {
+            return equalsIgnoreCase(draft.includedTitles, title);
+        }
+        return !equalsIgnoreCase(draft.excludedTitles, title);
+    }
+
+    /** Inverse of {@link #titleSurvivesMessageRules}: narrows the message pickers. */
+    private boolean packageSurvivesAppRules(String pkg) {
+        if (draft.includeOnlyPkgs && !draft.includedPkgs.isEmpty()) {
+            return equalsIgnoreCase(draft.includedPkgs, pkg);
+        }
+        return !equalsIgnoreCase(draft.excludedPkgs, pkg);
+    }
+
+    private String appScopeNote() {
+        if (draft.includeOnlyTitles && !draft.includedTitles.isEmpty()) {
+            return "\nOnly apps that posted an included message";
+        }
+        if (!draft.excludedTitles.isEmpty()) {
+            return "\nOnly apps with a message that is not excluded";
+        }
+        return "";
+    }
+
+    private String titleScopeNote() {
+        if (draft.includeOnlyPkgs && !draft.includedPkgs.isEmpty()) {
+            return "\nOnly messages posted by an included app";
+        }
+        if (!draft.excludedPkgs.isEmpty()) {
+            return "\nOnly messages not posted by an excluded app";
+        }
+        return "";
+    }
+
+    private List<String> extractUniquePackagesByFrequency() {
         Map<String, Integer> freq = new HashMap<>();
         File csvFile = new File(getFilesDir(), "notification_history.csv");
         if (!csvFile.exists()) return new ArrayList<>();
@@ -861,8 +891,7 @@ public class MainActivity extends AppCompatActivity {
                 String pkg = parts[1].trim();
                 String title = parts[2].trim();
                 if (pkg.isEmpty()) continue;
-                if (allowedTitles != null && !allowedTitles.isEmpty()
-                        && !equalsIgnoreCase(allowedTitles, title)) continue;
+                if (!titleSurvivesMessageRules(title)) continue;
                 Integer count = freq.get(pkg);
                 freq.put(pkg, count == null ? 1 : count + 1);
             }
@@ -872,7 +901,7 @@ public class MainActivity extends AppCompatActivity {
         return sortByFrequencyDesc(freq, Integer.MAX_VALUE);
     }
 
-    private List<String> extractUniqueTitlesByFrequency(Set<String> allowedPkgs) {
+    private List<String> extractUniqueTitlesByFrequency() {
         Map<String, Integer> freq = new HashMap<>();
         File csvFile = new File(getFilesDir(), "notification_history.csv");
         if (!csvFile.exists()) return new ArrayList<>();
@@ -886,8 +915,7 @@ public class MainActivity extends AppCompatActivity {
                 String pkg = parts[1].trim();
                 String title = parts[2].trim();
                 if (title.isEmpty()) continue;
-                if (allowedPkgs != null && !allowedPkgs.isEmpty()
-                        && !equalsIgnoreCase(allowedPkgs, pkg)) continue;
+                if (!packageSurvivesAppRules(pkg)) continue;
                 Integer count = freq.get(title);
                 freq.put(title, count == null ? 1 : count + 1);
             }
