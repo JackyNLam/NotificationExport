@@ -1,62 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:gravity="center">
+    android:fillViewport="true">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Notification History Export"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="32dp"/>
-
-    <Button
-        android:id="@+id/btnEnableListener"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="1. Enable Notification Access"
-        android:layout_marginBottom="16dp"/>
+        android:orientation="vertical"
+        android:padding="24dp">
 
-    <Button
-        android:id="@+id/btnExportLog"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="2a. Export History to Text File"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="24dp"
+            android:text="Notification History Export"
+            android:textSize="20sp"
+            android:textStyle="bold" />
 
-    <Button
-        android:id="@+id/btnFilterExport"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="2b. 🔍 Filter and Export CSV"
-        android:layout_marginTop="8dp"/>
+        <Button
+            android:id="@+id/btnEnableListener"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="1. Enable Notification Access" />
 
-    <Button
-        android:id="@+id/btnClearLog"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="3.🗑️ Clear Log History"
-        android:layout_marginTop="16dp"/>
+        <Button
+            android:id="@+id/btnExportLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2a. Export Full CSV History" />
 
-<!--    <Button-->
-<!--        android:id="@+id/btnTestWrite"-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:text="🛠 Test File Write"-->
-<!--        android:layout_marginTop="8dp"/>-->
+        <Button
+            android:id="@+id/btnFilterExport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="2b. 🔍 Filter and Export CSV" />
 
-    <TextView
-        android:id="@+id/tvListenerStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="200dp"
-        android:gravity="center"
-        android:padding="12dp"
-        android:text="⏳ Checking status..."
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        <Button
+            android:id="@+id/btnSchedule"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="3. ⏰ Auto-Export Schedule" />
 
-</LinearLayout>
+        <TextView
+            android:id="@+id/tvScheduleInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="4dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="4dp"
+            android:text=""
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnClearLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="4. 🗑️ Clear Log History" />
+
+        <TextView
+            android:id="@+id/tvListenerStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="⏳ Checking status..."
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+</ScrollView>

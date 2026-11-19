@@ -21,7 +21,7 @@ public class UnlockReceiver extends BroadcastReceiver {
 
     private void checkAndNotify(Context context) {
         String lastTimeStr = getLastNotificationTime(context);
-        if (lastTimeStr != null && isStale(lastTimeStr, 15)) {
+        if (lastTimeStr != null && isStale(lastTimeStr, 30)) {
             NotificationManagerCompat nm = NotificationManagerCompat.from(context);
             if (nm.areNotificationsEnabled()) {
                 Intent openSettings = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
@@ -33,9 +33,9 @@ public class UnlockReceiver extends BroadcastReceiver {
                 );
 
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "listener_status_channel")
-                        .setSmallIcon(android.R.drawable.stat_sys_warning)
+                        .setSmallIcon(R.drawable.ic_stat_export)
                         .setContentTitle("⚠️ Notification Listener Stale")
-                        .setContentText("Last capture >15min ago. Tap to re-toggle access.")
+                        .setContentText("Last capture >30min ago. Tap to re-toggle access.")
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
                         .setContentIntent(pi);

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon silhouette: single colour, tinted by the system. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M38,20 L70,20 A10,10 0 0 1 80,30 L80,48 A10,10 0 0 1 70,58 L38,58 A10,10 0 0 1 28,48 L28,30 A10,10 0 0 1 38,20 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,30 L72,30 A2,2 0 0 1 72,34 L36,34 A2,2 0 0 1 36,30 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,39 L62,39 A2,2 0 0 1 62,43 L36,43 A2,2 0 0 1 36,39 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,48 L68,48 A2,2 0 0 1 68,52 L36,52 A2,2 0 0 1 36,48 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M50,56 L58,56 L58,70 L50,70 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,68 L54,84 L67,68 Z" />
+</vector>

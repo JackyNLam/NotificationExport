@@ -13,15 +13,19 @@ Everything stays on-device. The app has no network permission and uploads nothin
 - **One-tap export / share** — share the raw CSV via the Android share sheet using a `FileProvider` URI.
 - **Filter before export** — build a filtered copy of the log and share only what you need:
   - Skip empty or `N/A` message bodies.
-  - Exclude selected apps (multi-select, sorted by how often they appear).
-  - Exclude selected message titles (multi-select, sorted by frequency).
-  - Filter choices are persisted in `SharedPreferences` and restored next time; a **Reset** action clears them.
+  - **Exclude** selected apps and message titles (multi-select, sorted by how often they appear).
+  - **Include only** selected apps and message titles — the inverse filter. An include list wins over the exclude list when enabled and non-empty.
+  - Filter choices are persisted in `SharedPreferences`, restored next time, and reused by the scheduled export; a **Reset** action clears them.
+- **Scheduled auto-export** — pick a time of day and the app writes a filtered CSV to
+  `Android/data/com.example.notificationexport/files/exports/` (app-specific external storage, so no storage permission is required). Only rows not yet exported are written, so each day's file is an incremental delta; a low-priority notification confirms the save.
 - **Listener health monitoring**
   - Status line on the main screen shows *Listening*, *Stale*, or *Disconnected*, plus the timestamp of the last captured notification.
-  - If nothing has been captured for 15 minutes, the app marks the listener *stale* and prompts you to toggle notification access off and on.
-  - A notification warns you when the listener disconnects.
+  - Every 30 minutes a background job checks the log. If nothing was captured in the last 30 minutes it posts a **silent probe notification** and waits 8 seconds: if the probe is not captured either, the listener is considered broken and a high-priority alert asks you to re-toggle notification access.
+  - A notification warns you immediately when the listener disconnects.
   - On device unlock, a broadcast receiver re-checks staleness and posts an alert if access appears to have been lost. (Android may silently kill notification listeners, especially under aggressive OEM battery management.)
+  - **Self-test now** in the schedule dialog runs the same probe on demand.
 - **Clear log** — delete the captured history from the app UI after confirmation.
+- **Custom launcher icon** — adaptive icon (gradient background, notification card + export arrow), a themed monochrome layer for Android 13+ themed icons, and generated legacy PNGs for API 24–25.
 
 ---
 
@@ -29,7 +33,7 @@ Everything stays on-device. The app has no network permission and uploads nothin
 
 - Android 7.0 (API 24) or newer — `minSdk 24`, `targetSdk`/`compileSdk` 36.
 - Notification access granted manually in **Settings → Apps → Special access → Notification access**.
-- On Android 13+, notification permission is needed for the app's own status/disconnect alerts.
+- On Android 13+, notification permission is needed for the app's own status/disconnect/capture alerts.
 
 ---
 
@@ -40,14 +44,23 @@ Everything stays on-device. The app has no network permission and uploads nothin
 3. Use the phone normally. Notifications are appended to the log as they arrive.
 4. Check the status line at the bottom of the screen:
    - ✅ Listening — capturing normally.
-   - ⚠️ Stale — no notification for 15+ minutes; re-toggle access if needed.
+   - ⚠️ No capture for 30 min — re-toggle access if the background check has not already alerted you.
    - ❌ Disconnected — access is off; re-enable it.
 5. Export when ready:
-   - **2a. Export History** — share the raw CSV.
+   - **2a. Export Full CSV History** — share the raw CSV.
    - **2b. 🔍 Filter and Export CSV** — choose filters, then share the filtered CSV.
-6. **3. 🗑️ Clear Log History** — wipe the log (asks for confirmation).
+6. **3. ⏰ Auto-Export Schedule** — enable, pick a time, save. The folder path is shown under the button.
+7. **4. 🗑️ Clear Log History** — wipe the log (asks for confirmation).
 
 > If captures stop unexpectedly (common with aggressive battery savers), disable battery optimization for this app and re-toggle notification access.
+
+### Scheduled export details
+
+- Storage path: `/storage/emulated/0/Android/data/com.example.notificationexport/files/exports/`
+- File name: `notifications_YYYY-MM-DD_HHmm.csv` (one per run, UTF-8 with BOM, same columns as the raw log).
+- Only rows newer than the previous successful export are written; clearing the log also resets that marker.
+- Uses an **inexact** daily alarm, so Android may delay it by a few minutes and Doze can defer it to a maintenance window. No exact-alarm permission is requested.
+- The alarm and the 30-minute health check are re-armed after a reboot or app update.
 
 ---
 
@@ -85,22 +98,36 @@ The **filtered** copy is written to the app cache directory as `notification_his
 
 ```
 app/src/main/java/com/example/notificationexport/
-├── MainActivity.java                     # UI: status, enable, export, filter, clear
-├── MyNotificationListenerService.java    # Captures notifications → CSV
-└── UnlockReceiver.java                   # Staleness check on screen unlock
+├── MainActivity.java                     # UI: status, enable, export, filter, schedule, clear
+├── MyNotificationListenerService.java    # Captures notifications → CSV; self-test hook
+├── FilterConfig.java                     # Persisted filter rules (exclude + include-only)
+├── CsvFilter.java                        # Applies rules, writes UTF-8-BOM CSV
+├── ScheduleManager.java                  # Daily alarm + export folder
+├── AutoExportReceiver.java               # Writes the scheduled filtered export
+├── HealthCheckJobService.java            # 30-minute capture health check
+├── SelfTest.java                         # Silent probe notification
+├── UnlockReceiver.java                   # Staleness check on screen unlock
+└── BootReceiver.java                     # Re-arms alarm + job after boot/update
 
 app/src/main/
-├── AndroidManifest.xml                   # Service/receiver/provider registration
+├── AndroidManifest.xml                   # Service/receiver/job/provider registration
 ├── res/layout/activity_main.xml          # Main screen layout
-└── res/xml/file_paths.xml                # FileProvider paths (files + cache)
+├── res/drawable/ic_launcher_*.xml        # Adaptive icon layers + monochrome theme layer
+├── res/drawable/ic_stat_export.xml       # Status-bar notification icon
+├── res/mipmap-*/                         # Legacy launcher PNGs (API 24–25)
+└── res/xml/file_paths.xml                # FileProvider paths (files + cache + external)
 ```
 
 | Component | Role |
 | --- | --- |
-| `MainActivity` | Buttons, listener status, CSV parsing/filtering, share intents |
-| `MyNotificationListenerService` | `NotificationListenerService`; appends rows to the CSV, posts disconnect alerts |
+| `MainActivity` | Buttons, listener status, filter dialog, schedule dialog, share intents |
+| `MyNotificationListenerService` | `NotificationListenerService`; appends rows to the CSV, posts disconnect alerts, flags self-test probes |
+| `FilterConfig` / `CsvFilter` | Shared rule set and the exporter that applies it (manual and scheduled) |
+| `ScheduleManager` / `AutoExportReceiver` | Inexact daily alarm and the incremental filtered export |
+| `HealthCheckJobService` / `SelfTest` | Periodic 30-minute check with a silent probe notification |
 | `UnlockReceiver` | Listens for `ACTION_USER_PRESENT`; warns if the log is stale |
-| `FileProvider` (`${applicationId}.fileprovider`) | Grants read access to internal files for sharing |
+| `BootReceiver` | Re-arms the alarm and the job on `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED` |
+| `FileProvider` (`${applicationId}.fileprovider`) | Grants read access to internal, cache and export files for sharing |
 
 ---
 
@@ -203,7 +230,8 @@ base64 -w 0 notificationexport-release.jks > keystore.b64
 | Permission | Why |
 | --- | --- |
 | `BIND_NOTIFICATION_LISTENER_SERVICE` (service-level) | Required by the system to bind a notification listener |
-| `POST_NOTIFICATIONS` | Disconnect / stale-access alerts on Android 13+ |
+| `POST_NOTIFICATIONS` | Disconnect / stale / capture-problem alerts on Android 13+ |
+| `RECEIVE_BOOT_COMPLETED` | Re-arms the daily export alarm and the persisted 30-minute health-check job after a reboot |
 
 The app declares **no internet permission** and performs no external communication.
 

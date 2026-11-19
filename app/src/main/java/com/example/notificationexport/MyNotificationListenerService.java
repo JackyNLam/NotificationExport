@@ -24,6 +24,22 @@ public class MyNotificationListenerService extends NotificationListenerService {
     private static final int DISCONNECT_NOTIF_ID = 999;
     private File csvFile;
 
+    // In-process capture signals used by the health check (same process as the job service).
+    private static volatile long lastCaptureAt = 0L;
+    private static volatile long selfTestSeenAt = 0L;
+
+    public static long getLastCaptureAt() {
+        return lastCaptureAt;
+    }
+
+    public static long getSelfTestSeenAt() {
+        return selfTestSeenAt;
+    }
+
+    public static void resetSelfTest() {
+        selfTestSeenAt = 0L;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -71,7 +87,7 @@ public class MyNotificationListenerService extends NotificationListenerService {
                 this, 0, new Intent(this, MainActivity.class), flags);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setSmallIcon(R.drawable.ic_stat_export)
                 .setContentTitle("⚠️ Notification Access Lost")
                 .setContentText("Tap to re-enable Notification Exporter")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -95,6 +111,16 @@ public class MyNotificationListenerService extends NotificationListenerService {
             String title = (titleSeq != null) ? titleSeq.toString().trim() : "";
             String text = (textSeq != null) ? textSeq.toString().trim() : "";
             String pkg = sbn.getPackageName();
+
+            lastCaptureAt = System.currentTimeMillis();
+
+            // Our own notifications are probes/alerts, not user history.
+            if (getPackageName().equals(pkg)) {
+                if (SelfTest.TITLE.equals(title)) {
+                    selfTestSeenAt = lastCaptureAt;
+                }
+                return;
+            }
 
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
             String timestamp = sdf.format(new Date(sbn.getPostTime()));
