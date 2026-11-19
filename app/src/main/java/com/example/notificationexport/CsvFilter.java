@@ -24,11 +24,14 @@ public final class CsvFilter {
         public final int kept;
         public final int skipped;
         public final long newestMillis;
+        /** Number of data rows read from the raw log (used as the auto-export cursor). */
+        public final int totalRows;
 
-        Result(int kept, int skipped, long newestMillis) {
+        Result(int kept, int skipped, long newestMillis, int totalRows) {
             this.kept = kept;
             this.skipped = skipped;
             this.newestMillis = newestMillis;
+            this.totalRows = totalRows;
         }
     }
 
@@ -36,15 +39,23 @@ public final class CsvFilter {
     }
 
     /**
-     * Writes rows matching {@code cfg} with a timestamp strictly after {@code sinceMillis}
-     * (pass 0 to include everything). Returns null when nothing was written.
+     * Writes rows that match {@code cfg} and fall inside the period.
+     *
+     * @param sinceMillis keep rows strictly newer than this; 0 = no lower bound
+     * @param untilMillis keep rows at or before this; 0 = no upper bound
+     * @param skipRows    ignore this many data rows from the top (the auto-export cursor,
+     *                    which guarantees a row is never exported twice, even when two
+     *                    notifications share the same one-second timestamp)
+     * @return null when nothing usable was written
      */
-    public static Result writeSince(File raw, File out, FilterConfig cfg, long sinceMillis) {
+    public static Result writeRange(File raw, File out, FilterConfig cfg,
+                                    long sinceMillis, long untilMillis, int skipRows) {
         if (raw == null || !raw.exists()) return null;
 
         SimpleDateFormat sdf = new SimpleDateFormat(DATE_PATTERN, Locale.US);
         int kept = 0;
         int skipped = 0;
+        int totalRows = 0;
         long newest = 0L;
         boolean wroteFile = false;
 
@@ -69,15 +80,19 @@ public final class CsvFilter {
                 String[] parts = parseCsvLine(line);
                 if (parts.length < 4) continue;
 
+                int rowIndex = totalRows++;
+                if (rowIndex < skipRows) continue;
+
                 long rowMillis = 0L;
                 try {
                     Date d = sdf.parse(parts[0].trim());
                     if (d != null) rowMillis = d.getTime();
                 } catch (Exception ignored) {
-                    // keep rowMillis at 0 so unparsable rows are treated as "old"
+                    // unparsable timestamp: treated as out of range by the checks below
                 }
 
-                if (sinceMillis > 0 && rowMillis <= sinceMillis) continue;
+                if (sinceMillis > 0 && rowMillis < sinceMillis) continue;
+                if (untilMillis > 0 && rowMillis > untilMillis) continue;
 
                 if (!cfg.matches(parts[1].trim(), parts[2].trim(), parts[3].trim())) {
                     skipped++;
@@ -100,16 +115,25 @@ public final class CsvFilter {
             out.delete();
             return null;
         }
-        return new Result(kept, skipped, newest);
+        return new Result(kept, skipped, newest, totalRows);
     }
 
     /** Newest timestamp in the raw capture log, or 0 when the log is missing/empty. */
     public static long lastTimestampMillis(android.content.Context ctx) {
+        return boundaryTimestamp(ctx, false);
+    }
+
+    /** Oldest timestamp in the raw capture log, or 0 when the log is missing/empty. */
+    public static long firstTimestampMillis(android.content.Context ctx) {
+        return boundaryTimestamp(ctx, true);
+    }
+
+    private static long boundaryTimestamp(android.content.Context ctx, boolean oldest) {
         File raw = new File(ctx.getFilesDir(), "notification_history.csv");
         if (!raw.exists()) return 0L;
 
         SimpleDateFormat sdf = new SimpleDateFormat(DATE_PATTERN, Locale.US);
-        long newest = 0L;
+        long result = 0L;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(raw), StandardCharsets.UTF_8))) {
             String line;
@@ -121,7 +145,9 @@ public final class CsvFilter {
                 if (parts.length == 0) continue;
                 try {
                     Date d = sdf.parse(parts[0].trim());
-                    if (d != null && d.getTime() > newest) newest = d.getTime();
+                    if (d == null) continue;
+                    long t = d.getTime();
+                    if (result == 0L || (oldest ? t < result : t > result)) result = t;
                 } catch (Exception ignored) {
                     // skip unparsable row
                 }
@@ -129,7 +155,7 @@ public final class CsvFilter {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return newest;
+        return result;
     }
 
     /** Same field parser as the main screen: handles quotes, escaped quotes and embedded commas. */

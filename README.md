@@ -16,8 +16,8 @@ Everything stays on-device. The app has no network permission and uploads nothin
   - **Exclude** selected apps and message titles (multi-select, sorted by how often they appear).
   - **Include only** selected apps and message titles — the inverse filter. An include list wins over the exclude list when enabled and non-empty.
   - Filter choices are persisted in `SharedPreferences`, restored next time, and reused by the scheduled export; a **Reset** action clears them.
-- **Scheduled auto-export** — pick a time of day and the app writes a filtered CSV to
-  `Android/data/com.example.notificationexport/files/exports/` (app-specific external storage, so no storage permission is required). Only rows not yet exported are written, so each day's file is an incremental delta; a low-priority notification confirms the save.
+- **Scheduled auto-export** — choose a time of day and an interval of *N* days (1 = daily), and the app writes a filtered CSV to
+  `Android/data/com.example.notificationexport/files/exports/` (app-specific external storage, so no storage permission is required). A persisted row cursor means a row is exported at most once, so nothing is duplicated between runs; a low-priority notification confirms the save.
 - **Listener health monitoring**
   - Status line on the main screen shows *Listening*, *Stale*, or *Disconnected*, plus the timestamp of the last captured notification.
   - Every 30 minutes a background job checks the log. If nothing was captured in the last 30 minutes it posts a **silent probe notification** and waits 8 seconds: if the probe is not captured either, the listener is considered broken and a high-priority alert asks you to re-toggle notification access.
@@ -48,8 +48,8 @@ Everything stays on-device. The app has no network permission and uploads nothin
    - ❌ Disconnected — access is off; re-enable it.
 5. Export when ready:
    - **2a. Export Full CSV History** — share the raw CSV.
-   - **2b. 🔍 Filter and Export CSV** — choose filters, then share the filtered CSV.
-6. **3. ⏰ Auto-Export Schedule** — enable, pick a time, save. The folder path is shown under the button.
+   - **2b. 🔍 Filter and Export CSV** — choose a day range (**From** / **To**, defaulting to the whole log), then the app and message filters, then share the filtered CSV.
+6. **3. ⏰ Auto-Export Schedule** — enable, set "every N day(s)", pick a time, save. The folder path and next run are shown under the button.
 7. **4. 🗑️ Clear Log History** — wipe the log (asks for confirmation).
 
 > If captures stop unexpectedly (common with aggressive battery savers), disable battery optimization for this app and re-toggle notification access.
@@ -58,8 +58,8 @@ Everything stays on-device. The app has no network permission and uploads nothin
 
 - Storage path: `/storage/emulated/0/Android/data/com.example.notificationexport/files/exports/`
 - File name: `notifications_YYYY-MM-DD_HHmm.csv` (one per run, UTF-8 with BOM, same columns as the raw log).
-- Only rows newer than the previous successful export are written; clearing the log also resets that marker.
-- Uses an **inexact** daily alarm, so Android may delay it by a few minutes and Doze can defer it to a maintenance window. No exact-alarm permission is requested.
+- A stored cursor records how many raw rows have already been exported, so each run writes only never-exported rows — no duplicates even when two notifications share the same timestamp. Clearing the log resets the cursor.
+- Runs once every *N* days (N is configurable, 1 = daily) using a **single inexact alarm** that is re-armed after each run: Android may delay it by a few minutes and Doze can defer it to a maintenance window, and no exact-alarm permission is requested.
 - The alarm and the 30-minute health check are re-armed after a reboot or app update.
 
 ---
@@ -102,7 +102,7 @@ app/src/main/java/com/example/notificationexport/
 ├── MyNotificationListenerService.java    # Captures notifications → CSV; self-test hook
 ├── FilterConfig.java                     # Persisted filter rules (exclude + include-only)
 ├── CsvFilter.java                        # Applies rules, writes UTF-8-BOM CSV
-├── ScheduleManager.java                  # Daily alarm + export folder
+├── ScheduleManager.java                  # N-day alarm + export cursor + folder
 ├── AutoExportReceiver.java               # Writes the scheduled filtered export
 ├── HealthCheckJobService.java            # 30-minute capture health check
 ├── SelfTest.java                         # Silent probe notification

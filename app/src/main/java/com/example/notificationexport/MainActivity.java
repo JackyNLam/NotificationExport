@@ -2,6 +2,7 @@ package com.example.notificationexport;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -11,9 +12,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -30,6 +33,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
@@ -91,7 +95,7 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton("Yes", (dialog, which) -> {
                     File csvFile = new File(getFilesDir(), "notification_history.csv");
                     if (csvFile.exists() && csvFile.delete()) {
-                        ScheduleManager.setLastExportMillis(this, 0L);
+                        ScheduleManager.resetCursor(this);
                         Toast.makeText(this, "\u2705 Log cleared", Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(this, "Log is already empty", Toast.LENGTH_SHORT).show();
@@ -124,7 +128,7 @@ public class MainActivity extends AppCompatActivity {
         if (content == null) return;
 
         final int side = dp(24);
-        final int top = dp(48);
+        final int top = dp(24);
         final int bottom = dp(24);
 
         ViewCompat.setOnApplyWindowInsetsListener(content, (v, windowInsets) -> {
@@ -179,7 +183,14 @@ public class MainActivity extends AppCompatActivity {
         if (ScheduleManager.isEnabled(this)) {
             String time = String.format(Locale.US, "%02d:%02d",
                     ScheduleManager.getHour(this), ScheduleManager.getMinute(this));
-            tvScheduleInfo.setText("⏰ Daily at " + time + "\nFolder: "
+            int days = ScheduleManager.getIntervalDays(this);
+            String when = days == 1 ? "Daily at " + time : "Every " + days + " days at " + time;
+            long next = ScheduleManager.getNextFireMillis(this);
+            String nextLine = next > 0
+                    ? "\nNext: " + new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+                            .format(new Date(next))
+                    : "";
+            tvScheduleInfo.setText("⏰ " + when + nextLine + "\nFolder: "
                     + ScheduleManager.getExportDirDisplayPath(this));
         } else {
             tvScheduleInfo.setText("⏰ Auto-export off");
@@ -258,7 +269,11 @@ public class MainActivity extends AppCompatActivity {
         startActivity(Intent.createChooser(share, "Share CSV Notification History"));
     }
 
-    private void exportFiltered() {
+    /**
+     * Writes the filtered log for {@code [fromMillis, toMillis]} and shares it.
+     * A zero bound means "no limit"; both zero means the whole log.
+     */
+    private void exportFiltered(long fromMillis, long toMillis) {
         File rawFile = new File(getFilesDir(), "notification_history.csv");
         if (!rawFile.exists() || rawFile.length() <= 40) {
             Toast.makeText(this, "No raw data to filter.", Toast.LENGTH_SHORT).show();
@@ -267,10 +282,10 @@ public class MainActivity extends AppCompatActivity {
 
         FilterConfig cfg = FilterConfig.load(this);
         File filteredFile = new File(getCacheDir(), "notification_history_filtered.csv");
-        CsvFilter.Result result = CsvFilter.writeSince(rawFile, filteredFile, cfg, 0L);
+        CsvFilter.Result result = CsvFilter.writeRange(rawFile, filteredFile, cfg, fromMillis, toMillis, 0);
 
         if (result == null || result.kept == 0) {
-            Toast.makeText(this, "\u26A0\uFE0F All rows filtered out.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "\u26A0\uFE0F No rows match that filter/period.", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -299,9 +314,29 @@ public class MainActivity extends AppCompatActivity {
         layout.setPadding(48, 32, 48, 16);
 
         CheckBox chkEnable = new CheckBox(this);
-        chkEnable.setText("Enable daily auto-export (filtered)");
+        chkEnable.setText("Enable scheduled auto-export (filtered)");
         chkEnable.setChecked(ScheduleManager.isEnabled(this));
         layout.addView(chkEnable);
+
+        LinearLayout intervalRow = new LinearLayout(this);
+        intervalRow.setOrientation(LinearLayout.HORIZONTAL);
+        intervalRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        TextView tvEvery = new TextView(this);
+        tvEvery.setText("Every ");
+        intervalRow.addView(tvEvery);
+
+        final EditText etDays = new EditText(this);
+        etDays.setInputType(InputType.TYPE_CLASS_NUMBER);
+        etDays.setText(String.valueOf(ScheduleManager.getIntervalDays(this)));
+        etDays.setEms(3);
+        intervalRow.addView(etDays);
+
+        TextView tvDays = new TextView(this);
+        tvDays.setText(" day(s)");
+        intervalRow.addView(tvDays);
+
+        layout.addView(intervalRow);
 
         int[] time = {ScheduleManager.getHour(this), ScheduleManager.getMinute(this)};
         Button btnTime = new Button(this);
@@ -316,7 +351,7 @@ public class MainActivity extends AppCompatActivity {
 
         TextView tvPath = new TextView(this);
         tvPath.setText("Saved to:\n" + ScheduleManager.getExportDirDisplayPath(this)
-                + "\n\nOnly rows not yet exported are written, using your current filter.");
+                + "\n\nEach run only writes rows that were never exported before, so nothing is duplicated.");
         tvPath.setTextSize(12);
         tvPath.setTextColor(Color.GRAY);
         tvPath.setPadding(0, 16, 0, 8);
@@ -326,10 +361,18 @@ public class MainActivity extends AppCompatActivity {
                 .setTitle("\u23F0 Auto-Export Schedule")
                 .setView(layout)
                 .setPositiveButton("Save", (d, which) -> {
-                    ScheduleManager.save(this, chkEnable.isChecked(), time[0], time[1]);
+                    int days = 1;
+                    try {
+                        days = Integer.parseInt(etDays.getText().toString().trim());
+                    } catch (Exception ignored) {
+                        // keep default
+                    }
+                    if (days < 1) days = 1;
+                    ScheduleManager.save(this, chkEnable.isChecked(), time[0], time[1], days);
                     updateScheduleInfo();
                     Toast.makeText(this, chkEnable.isChecked()
-                            ? "\u2705 Daily export at " + timeText(time[0], time[1])
+                            ? "\u2705 " + (days == 1 ? "Daily" : "Every " + days + " days")
+                              + " at " + timeText(time[0], time[1])
                             : "Auto-export disabled", Toast.LENGTH_LONG).show();
                 })
                 .setNeutralButton("Self-test now", (d, which) -> runSelfTest())
@@ -366,6 +409,39 @@ public class MainActivity extends AppCompatActivity {
         chkSkipEmpty.setChecked(draft.skipEmpty);
         chkSkipEmpty.setOnCheckedChangeListener((btn, isChecked) -> draft.skipEmpty = isChecked);
         layout.addView(chkSkipEmpty);
+
+        // ---- Period: from day .. to day (defaults to the whole captured log) ----
+        layout.addView(spacer());
+
+        TextView tvPeriodLabel = new TextView(this);
+        tvPeriodLabel.setText("\uD83D\uDCC5 Period (days)");
+        tvPeriodLabel.setTextSize(13);
+        tvPeriodLabel.setTextColor(Color.parseColor("#616161"));
+        layout.addView(tvPeriodLabel);
+
+        long firstRow = CsvFilter.firstTimestampMillis(this);
+        final long[] range = {
+                firstRow > 0 ? startOfDay(firstRow) : 0L,
+                endOfDay(System.currentTimeMillis())
+        };
+
+        Button btnFrom = new Button(this);
+        btnFrom.setAllCaps(false);
+        btnFrom.setText(fromText(range[0]));
+        btnFrom.setOnClickListener(v -> pickDay(range[0], true, millis -> {
+            range[0] = millis;
+            btnFrom.setText(fromText(range[0]));
+        }));
+        layout.addView(btnFrom);
+
+        Button btnTo = new Button(this);
+        btnTo.setAllCaps(false);
+        btnTo.setText(toText(range[1]));
+        btnTo.setOnClickListener(v -> pickDay(range[1], false, millis -> {
+            range[1] = millis;
+            btnTo.setText(toText(range[1]));
+        }));
+        layout.addView(btnTo);
 
         layout.addView(spacer());
 
@@ -414,7 +490,7 @@ public class MainActivity extends AppCompatActivity {
         layout.addView(btnSelectIncludeTitles);
 
         TextView tvInfo = new TextView(this);
-        tvInfo.setText("\u2139\uFE0F Saved automatically and reused by the daily auto-export.");
+        tvInfo.setText("\u2139\uFE0F Saved automatically and reused by the scheduled auto-export.");
         tvInfo.setTextSize(12);
         tvInfo.setTextColor(Color.GRAY);
         tvInfo.setPadding(0, 24, 0, 0);
@@ -423,11 +499,11 @@ public class MainActivity extends AppCompatActivity {
         refreshFilterButtonStates();
 
         new AlertDialog.Builder(this)
-                .setTitle("\uD83D\uDD0D Filter Before Export")
+                .setTitle("\uD83D\uDD0D Filter and Period Before Export")
                 .setView(layout)
                 .setPositiveButton("Export Filtered", (d, which) -> {
                     draft.save(this);
-                    exportFiltered();
+                    exportFiltered(range[0], range[1]);
                 })
                 .setNeutralButton("Reset", (d, which) -> {
                     FilterConfig.reset(this);
@@ -441,6 +517,51 @@ public class MainActivity extends AppCompatActivity {
         View v = new View(this);
         v.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 24));
         return v;
+    }
+
+    // ---- Day-range helpers for the manual export period ----
+
+    private interface DayPicked {
+        void onPicked(long millis);
+    }
+
+    private void pickDay(long current, boolean isFrom, DayPicked callback) {
+        Calendar seed = Calendar.getInstance();
+        if (current > 0) seed.setTimeInMillis(current);
+        new DatePickerDialog(this, (view, year, month, day) -> {
+            Calendar picked = Calendar.getInstance();
+            picked.set(year, month, day, 0, 0, 0);
+            picked.set(Calendar.MILLISECOND, 0);
+            long millis = picked.getTimeInMillis();
+            callback.onPicked(isFrom ? startOfDay(millis) : endOfDay(millis));
+        }, seed.get(Calendar.YEAR), seed.get(Calendar.MONTH),
+                seed.get(Calendar.DAY_OF_MONTH)).show();
+    }
+
+    private static long startOfDay(long millis) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(millis);
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    private static long endOfDay(long millis) {
+        return startOfDay(millis) + 24L * 60L * 60L * 1000L - 1L;
+    }
+
+    private static String dayText(long millis) {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(millis));
+    }
+
+    private static String fromText(long millis) {
+        return millis > 0 ? "From: " + dayText(millis) : "From: any day";
+    }
+
+    private static String toText(long millis) {
+        return millis > 0 ? "To: " + dayText(millis) : "To: any day";
     }
 
     /** An "include only" toggle makes the opposite list inapplicable. */

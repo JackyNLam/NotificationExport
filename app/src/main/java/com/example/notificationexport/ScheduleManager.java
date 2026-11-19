@@ -12,8 +12,9 @@ import java.io.File;
 import java.util.Calendar;
 
 /**
- * Daily auto-export schedule. Uses an inexact repealing alarm so no special
- * alarm permission is needed on Android 12+.
+ * Auto-export schedule. Fires once every N days at the chosen clock time, using
+ * a single inexact alarm that is re-armed after each run (no exact-alarm
+ * permission needed, and the interval can be any number of days).
  */
 public final class ScheduleManager {
 
@@ -21,6 +22,9 @@ public final class ScheduleManager {
     public static final String K_ENABLED = "enabled";
     public static final String K_HOUR = "hour";
     public static final String K_MINUTE = "minute";
+    public static final String K_INTERVAL_DAYS = "interval_days";
+    public static final String K_NEXT_FIRE = "next_fire_ms";
+    public static final String K_EXPORTED_ROWS = "exported_rows";
     public static final String K_LAST_EXPORT_MS = "last_export_ms";
 
     private static final int REQUEST_CODE = 1001;
@@ -41,13 +45,30 @@ public final class ScheduleManager {
         return prefs(ctx).getInt(K_MINUTE, 0);
     }
 
-    public static void save(Context ctx, boolean enabled, int hour, int minute) {
+    public static int getIntervalDays(Context ctx) {
+        int days = prefs(ctx).getInt(K_INTERVAL_DAYS, 1);
+        return days < 1 ? 1 : days;
+    }
+
+    public static void save(Context ctx, boolean enabled, int hour, int minute, int intervalDays) {
         prefs(ctx).edit()
                 .putBoolean(K_ENABLED, enabled)
                 .putInt(K_HOUR, hour)
                 .putInt(K_MINUTE, minute)
+                .putInt(K_INTERVAL_DAYS, Math.max(1, intervalDays))
+                // Drop the stored fire time so a new time/interval takes effect now.
+                .remove(K_NEXT_FIRE)
                 .apply();
         applySchedule(ctx);
+    }
+
+    /** Cursor: how many rows of the raw log have already been written to an export. */
+    public static int getExportedRowCount(Context ctx) {
+        return prefs(ctx).getInt(K_EXPORTED_ROWS, 0);
+    }
+
+    public static void setExportedRowCount(Context ctx, int rows) {
+        prefs(ctx).edit().putInt(K_EXPORTED_ROWS, Math.max(0, rows)).apply();
     }
 
     public static long getLastExportMillis(Context ctx) {
@@ -56,6 +77,14 @@ public final class ScheduleManager {
 
     public static void setLastExportMillis(Context ctx, long millis) {
         prefs(ctx).edit().putLong(K_LAST_EXPORT_MS, millis).apply();
+    }
+
+    /** Called when the log is cleared: the cursor must restart from zero. */
+    public static void resetCursor(Context ctx) {
+        prefs(ctx).edit()
+                .putInt(K_EXPORTED_ROWS, 0)
+                .putLong(K_LAST_EXPORT_MS, 0L)
+                .apply();
     }
 
     /**
@@ -76,7 +105,12 @@ public final class ScheduleManager {
         return getExportDir(ctx).getAbsolutePath();
     }
 
-    /** (Re)schedules or cancels the daily alarm. Safe to call repeatedly. */
+    /** Milliseconds of the next scheduled run, or 0 when not scheduled. */
+    public static long getNextFireMillis(Context ctx) {
+        return prefs(ctx).getLong(K_NEXT_FIRE, 0L);
+    }
+
+    /** (Re)arms the next one-shot alarm. Safe to call repeatedly. */
     public static void applySchedule(Context ctx) {
         AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
@@ -85,24 +119,44 @@ public final class ScheduleManager {
         am.cancel(pi);
 
         if (!isEnabled(ctx)) {
+            prefs(ctx).edit().remove(K_NEXT_FIRE).apply();
             pi.cancel();
             return;
         }
 
+        long now = System.currentTimeMillis();
+        long next = prefs(ctx).getLong(K_NEXT_FIRE, 0L);
+        if (next <= now) {
+            next = nextClockTime(now, getHour(ctx), getMinute(ctx));
+        }
+        prefs(ctx).edit().putLong(K_NEXT_FIRE, next).apply();
+
+        am.set(AlarmManager.RTC_WAKEUP, next, pi);
+    }
+
+    /** Advances the schedule past the run that just happened, then re-arms. */
+    public static void onAlarmFired(Context ctx) {
+        long now = System.currentTimeMillis();
+        long step = getIntervalDays(ctx) * AlarmManager.INTERVAL_DAY;
+        long next = prefs(ctx).getLong(K_NEXT_FIRE, now) + step;
+        if (next <= now) {
+            next = nextClockTime(now, getHour(ctx), getMinute(ctx));
+        }
+        prefs(ctx).edit().putLong(K_NEXT_FIRE, next).apply();
+        applySchedule(ctx);
+    }
+
+    private static long nextClockTime(long now, int hour, int minute) {
         Calendar next = Calendar.getInstance();
-        next.set(Calendar.HOUR_OF_DAY, getHour(ctx));
-        next.set(Calendar.MINUTE, getMinute(ctx));
+        next.setTimeInMillis(now);
+        next.set(Calendar.HOUR_OF_DAY, hour);
+        next.set(Calendar.MINUTE, minute);
         next.set(Calendar.SECOND, 0);
         next.set(Calendar.MILLISECOND, 0);
-        if (next.getTimeInMillis() <= System.currentTimeMillis()) {
+        if (next.getTimeInMillis() <= now) {
             next.add(Calendar.DAY_OF_YEAR, 1);
         }
-
-        am.setInexactRepeating(
-                AlarmManager.RTC_WAKEUP,
-                next.getTimeInMillis(),
-                AlarmManager.INTERVAL_DAY,
-                pi);
+        return next.getTimeInMillis();
     }
 
     private static PendingIntent pendingIntent(Context ctx) {

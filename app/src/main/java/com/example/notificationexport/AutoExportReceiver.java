@@ -24,10 +24,18 @@ public class AutoExportReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!ScheduleManager.isEnabled(context)) return;
-        exportNow(context);
+        try {
+            exportNow(context);
+        } finally {
+            // Re-arm for the next interval even if this run had nothing to write.
+            ScheduleManager.onAlarmFired(context);
+        }
     }
 
-    /** Runs the export immediately. Returns the number of rows written, or -1 when nothing was saved. */
+    /**
+     * Writes every row that has not been exported before. Returns the number of
+     * rows written, or -1 when nothing was saved.
+     */
     public static int exportNow(Context context) {
         File raw = new File(context.getFilesDir(), "notification_history.csv");
         if (!raw.exists() || raw.length() == 0) return -1;
@@ -41,12 +49,42 @@ public class AutoExportReceiver extends BroadcastReceiver {
                 + ".csv";
         File out = new File(dir, name);
 
-        CsvFilter.Result result = CsvFilter.writeSince(raw, out, cfg, ScheduleManager.getLastExportMillis(context));
-        if (result == null || result.kept == 0) return -1;
+        int alreadyExported = ScheduleManager.getExportedRowCount(context);
+        CsvFilter.Result result = CsvFilter.writeRange(raw, out, cfg, 0L, 0L, alreadyExported);
 
-        ScheduleManager.setLastExportMillis(context, result.newestMillis);
+        if (result == null) {
+            // Nothing new (or every new row was filtered out): advance the cursor so
+            // filtered rows are not reconsidered forever.
+            int total = countDataRows(raw);
+            if (total >= alreadyExported) {
+                ScheduleManager.setExportedRowCount(context, total);
+            }
+            return -1;
+        }
+
+        ScheduleManager.setExportedRowCount(context, result.totalRows);
+        ScheduleManager.setLastExportMillis(context, System.currentTimeMillis());
         notifySaved(context, result.kept, name);
         return result.kept;
+    }
+
+    /** Fallback counter used when nothing was written, so the cursor still advances. */
+    private static int countDataRows(File raw) {
+        int rows = 0;
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(
+                        new java.io.FileInputStream(raw), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            boolean first = true;
+            while ((line = reader.readLine()) != null) {
+                if (first) { first = false; continue; }
+                if (line.trim().isEmpty()) continue;
+                rows++;
+            }
+        } catch (Exception e) {
+            return 0;
+        }
+        return rows;
     }
 
     private static void notifySaved(Context context, int rows, String fileName) {

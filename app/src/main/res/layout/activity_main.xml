@@ -3,6 +3,7 @@
     android:id="@+id/rootScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/white"
     android:clipToPadding="false"
     android:fillViewport="true">
 
@@ -10,9 +11,10 @@
         android:id="@+id/contentLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="vertical"
         android:paddingStart="24dp"
-        android:paddingTop="48dp"
+        android:paddingTop="24dp"
         android:paddingEnd="24dp"
         android:paddingBottom="24dp">
 
@@ -22,6 +24,7 @@
             android:layout_gravity="center_horizontal"
             android:layout_marginBottom="32dp"
             android:text="Notification History Export"
+            android:textColor="@color/black"
             android:textSize="20sp"
             android:textStyle="bold" />
 
